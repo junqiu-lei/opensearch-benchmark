@@ -1035,6 +1035,7 @@ class Query(Runner):
                 "success": True,
                 "recall@k": 0,
                 "recall@1": 0,
+                "recall@r": 0,
             }
 
             def _is_empty_search_results(content):
@@ -1085,6 +1086,63 @@ class Query(Runner):
                         correct += 1.0
 
                 return correct / min_num_of_results
+            
+            def get_distance_true_neighbors(target_query, predictions, neighbors, distance, distance_type):
+                """
+                Get the true neighbors for a query based on distance and distance type
+                Args:
+                    target_query: query for which neighbors are to be found
+                    predictions: list containing ids of results returned by OpenSearch.
+                    neighbors: list containing ids of the actual neighbors for a set of queries
+                    distance: distance used for radius search
+                    distance_type: type of distance used for radius search
+                Returns:
+                    True neighbors for a query based on distance and distance type
+                """
+                true_neighbors_set = []
+                if neighbors is None:
+                    self.logger.info("No neighbors are provided for recall calculation")
+                    return true_neighbors_set
+                for j in range(len(neighbors)):
+                    if distance_type == "l2":
+                        if np.sum((target_query - neighbors[j]) ** 2) < distance:
+                            true_neighbors_set.append(j)
+                    elif distance_type == "cosine":
+                        # need update for cosine distance
+                        if np.dot(target_query, neighbors[j]) > distance:
+                            true_neighbors_set.append(j)
+                    else:
+                        self.logger.info("Invalid distance type for radius search")
+                        return true_neighbors_set
+                return true_neighbors_set
+            
+            def calculate_distance_search_recall(predictions, true_neighbors_set):
+                """
+                Calculates the recall by comparing distance search neighbors with predictions.
+                recall = Sum of matched neighbors from predictions / total number of neighbors from ground truth
+                Args:
+                    predictions: list containing ids of results returned by OpenSearch.
+                    true_neighbors_set: list containing ids of the actual neighbors for a set of queries
+                Returns:
+                    Recall between predictions and true neighbors from ground truth
+                """
+                correct = 0.0
+                if true_neighbors_set is None:
+                    self.logger.info("No true neighbors are provided for recall calculation")
+                    return 0.0
+                for j in range(len(predictions)):
+                    if predictions[j] in true_neighbors_set:
+                        correct += 1.0
+                return correct / len(true_neighbors_set)
+            
+            num_neighbors = params.get("k", 1)
+            distance = params.get("distance")
+            distance_type = params.get("distance_type")
+
+            self.logger.info("Distance parameter is %s", distance)
+            self.logger.info("request_params is: %s", request_params)
+            self.logger.info("body is: %s", body)
+            self.logger.info("opensearch is: %s", opensearch)
 
             doc_type = params.get("type")
             response = await self._raw_search(opensearch, doc_type, index, body, request_params, headers=headers)
@@ -1115,7 +1173,6 @@ class Query(Runner):
                     continue
                 candidates.append(field_value)
             neighbors_dataset = params["neighbors"]
-            num_neighbors = params.get("k", 1)
             recall_k = calculate_recall(candidates, neighbors_dataset, num_neighbors)
             result.update({"recall@k": recall_k})
 
