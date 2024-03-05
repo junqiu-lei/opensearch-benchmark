@@ -1136,13 +1136,14 @@ class Query(Runner):
                 return correct / len(true_neighbors_set)
             
             num_neighbors = params.get("k", 1)
-            distance = params.get("distance")
-            distance_type = params.get("distance_type")
+            # distance = params.get("distance")
+            # distance_type = params.get("distance_type")
 
-            self.logger.info("Distance parameter is %s", distance)
+            # self.logger.info("Distance parameter is %s", distance)
             self.logger.info("request_params is: %s", request_params)
             self.logger.info("body is: %s", body)
             self.logger.info("opensearch is: %s", opensearch)
+            self.logger,.info("params is: %s", params)
 
             doc_type = params.get("type")
             response = await self._raw_search(opensearch, doc_type, index, body, request_params, headers=headers)
