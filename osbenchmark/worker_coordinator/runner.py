@@ -1140,10 +1140,10 @@ class Query(Runner):
             # distance_type = params.get("distance_type")
 
             # self.logger.info("Distance parameter is %s", distance)
-            self.logger.info("request_params is: %s", request_params)
+            # self.logger.info("request_params is: %s", request_params)
             self.logger.info("body is: %s", body)
             self.logger.info("opensearch is: %s", opensearch)
-            self.logger,.info("params is: %s", params)
+            self.logger.info("params is: %s", params)
 
             doc_type = params.get("type")
             response = await self._raw_search(opensearch, doc_type, index, body, request_params, headers=headers)
@@ -1176,9 +1176,11 @@ class Query(Runner):
             neighbors_dataset = params["neighbors"]
             recall_k = calculate_recall(candidates, neighbors_dataset, num_neighbors)
             result.update({"recall@k": recall_k})
+            self.logger.info("Recall@d is %f", recall_k)
 
             recall_1 = calculate_recall(candidates, neighbors_dataset, 1)
             result.update({"recall@1": recall_1})
+            self.logger.info("Recall@1 is %f", recall_1)
 
             recall_processing_end = time.perf_counter()
             recall_processing_time = convert.seconds_to_ms(recall_processing_end - recall_processing_start)

@@ -951,8 +951,13 @@ class VectorDataSetPartitionParamSource(ParamSource):
             self._validate_data_set_corpus(data_set_path)
             self.data_set_path = data_set_path[0]
         if self.data_set is None:
+            self.logger.info("Creating data set for partition %s", partition_index)
+            self.logger.info("Context: %s", self.context)
             self.data_set: DataSet = get_data_set(
                 self.data_set_format, self.data_set_path, self.context)
+            if self.context == Context.QUERY:
+                self.distance_threshold_data_set = get_data_set(
+                    self.data_set_format, self.data_set_path, Context.DISTANCE_THRESHOLD)
         # if value is -1 or greater than dataset size, use dataset size as num_vectors
         if self.total_num_vectors < 0 or self.total_num_vectors > self.data_set.size():
             self.total_num_vectors = self.data_set.size()
@@ -1054,6 +1059,8 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         self.neighbors_data_set_corpus = params.get(self.PARAMS_NAME_NEIGHBORS_DATA_SET_CORPUS)
         self._validate_neighbors_data_set(self.neighbors_data_set_path, self.neighbors_data_set_corpus)
         self.neighbors_data_set = None
+        self.distance_threshold_data_set = None
+        self.distance = None
         operation_type = parse_string_parameter(self.PARAMS_NAME_OPERATION_TYPE, params,
                                                 self.PARAMS_VALUE_VECTOR_SEARCH)
         self.query_params = query_params
@@ -1096,7 +1103,11 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
                 "[%s] param from body will be replaced with vector search query.", self.PARAMS_NAME_QUERY)
         efficient_filter=self.query_params.get(self.PARAMS_NAME_FILTER)
         # override query params with vector search query
-        body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter)
+        if self.distance:
+            body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_radius_query_body(vector, self.distance, efficient_filter)
+        else:
+            body_params[self.PARAMS_NAME_QUERY] = self._build_vector_search_query_body(vector, efficient_filter)
+        self.logger.info("query_params: %s", body_params)
         self.query_params.update({self.PARAMS_NAME_BODY: body_params})
 
     def partition(self, partition_index, total_partitions):
@@ -1128,11 +1139,16 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
         elif is_dataset_exhausted:
             raise StopIteration
         vector = self.data_set.read(1)[0]
+        self.distance = self.distance_threshold_data_set.read(1)[0]
+        self.logger.info("Vector: %s, Distance: %s", vector, self.distance)
         neighbor = self.neighbors_data_set.read(1)[0]
         true_neighbors = list(map(str, neighbor[:self.k]))
         self.query_params.update({
             "neighbors": true_neighbors,
         })
+        # self._update_params.update({
+        #     "distance": distance,
+        # })
         self._update_request_params()
         self._update_body_params(vector)
         self.current += 1
@@ -1160,6 +1176,29 @@ class VectorSearchPartitionParamSource(VectorDataSetPartitionParamSource):
                 self.field_name: query,
             },
         }
+    
+    def _build_vector_search_radius_query_body(self, vector, distance, efficient_filter=None) -> dict:
+        """Builds a k-NN request that can be used to execute an approximate nearest
+        neighbor search against a k-NN plugin index
+        Args:
+            vector: vector used for query
+            radius: radius used for query
+        Returns:
+            A dictionary containing the body used for search query
+        """
+        query = {
+            "vector": vector,
+            "distance": distance,
+        }
+        if efficient_filter:
+            query.update({
+                "filter": efficient_filter,
+            })
+        return {
+            "knn": {
+                self.field_name: query,
+            },
+        }
 
 
 class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
@@ -1176,6 +1215,7 @@ class BulkVectorsFromDataSetParamSource(VectorDataSetPartitionParamSource):
 
     def __init__(self, workload, params, **kwargs):
         super().__init__(workload, params, Context.INDEX, **kwargs)
+        self.logger = logging.getLogger(__name__)
         self.bulk_size: int = parse_int_parameter("bulk_size", params)
         self.retries: int = parse_int_parameter("retries", params,
                                                 self.DEFAULT_RETRIES)
